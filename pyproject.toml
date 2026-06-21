@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nvd-mcp"
+version = "0.1.0"
+description = "MCP server for querying NIST NVD vulnerability intelligence"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=3.4.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+nvd-mcp = "nvd_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nvd_mcp"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
