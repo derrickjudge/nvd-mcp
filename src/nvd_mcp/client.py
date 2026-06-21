@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 NVD_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 _USER_AGENT = "nvd-mcp/0.1.0"
-_TIMEOUT = httpx.Timeout(10.0)
+_TIMEOUT = httpx.Timeout(30.0)
 _MAX_RETRIES = 3
 # Sleep durations (seconds) between retry attempts — index = attempt number
 _RETRY_BACKOFF = [1.0, 2.0, 4.0]
@@ -26,6 +26,42 @@ _RETRY_BACKOFF = [1.0, 2.0, 4.0]
 # ---------------------------------------------------------------------------
 # Helpers: extract data from raw NvdCve objects
 # ---------------------------------------------------------------------------
+
+
+def _severity_from_label(label: str | None) -> Severity:
+    """Map a CVSS severity string to a Severity enum value.
+
+    Args:
+        label: Severity label from the NVD response, e.g. ``"CRITICAL"``.
+
+    Returns:
+        Matching Severity member, or UNKNOWN if the label is unrecognised.
+    """
+    if not label:
+        return Severity.UNKNOWN
+    try:
+        return Severity(label.upper())
+    except ValueError:
+        return Severity.UNKNOWN
+
+
+def _severity_from_v2_score(score: float) -> Severity:
+    """Derive a severity label from a CVSSv2 base score.
+
+    CVSSv2 responses from NVD omit the ``baseSeverity`` field. The NVD
+    standard bands are LOW < 4.0, MEDIUM 4.0–6.9, HIGH >= 7.0.
+
+    Args:
+        score: CVSSv2 base score (0.0–10.0).
+
+    Returns:
+        Severity band for the given score.
+    """
+    if score >= 7.0:
+        return Severity.HIGH
+    if score >= 4.0:
+        return Severity.MEDIUM
+    return Severity.LOW
 
 
 def _extract_cvss(
@@ -48,19 +84,19 @@ def _extract_cvss(
             continue
         primary = next((m for m in metric_list if m.type == "Primary"), None)
         entry = primary or metric_list[0]
-        try:
-            severity = Severity(entry.cvss_data.base_severity.upper())
-        except ValueError:
-            severity = Severity.UNKNOWN
+        severity = _severity_from_label(entry.cvss_data.base_severity)
         return entry.cvss_data.base_score, severity, entry.cvss_data.vector_string
 
     if cve.metrics.cvss_metric_v2:
         entry = cve.metrics.cvss_metric_v2[0]
-        try:
-            severity = Severity(entry.cvss_data.base_severity.upper())
-        except ValueError:
-            severity = Severity.UNKNOWN
-        return entry.cvss_data.base_score, severity, entry.cvss_data.vector_string
+        score = entry.cvss_data.base_score
+        # CVSSv2 omits baseSeverity — derive it from the score range
+        severity = (
+            _severity_from_label(entry.cvss_data.base_severity)
+            if entry.cvss_data.base_severity
+            else _severity_from_v2_score(score)
+        )
+        return score, severity, entry.cvss_data.vector_string
 
     return None, Severity.UNKNOWN, None
 
@@ -167,10 +203,25 @@ class NvdClient:
 
         Raises:
             httpx.HTTPStatusError: On non-429 HTTP error responses.
+            httpx.TimeoutException: If all retry attempts time out.
             RuntimeError: If the rate limit persists after all retries.
         """
         for attempt in range(_MAX_RETRIES):
-            response = await self._http.get(NVD_BASE_URL, params=params)
+            try:
+                response = await self._http.get(NVD_BASE_URL, params=params)
+            except httpx.TimeoutException:
+                if attempt < _MAX_RETRIES - 1:
+                    wait = _RETRY_BACKOFF[attempt]
+                    logger.warning(
+                        "NVD request timed out (attempt %d/%d)"
+                        " — retrying in %.1fs",
+                        attempt + 1,
+                        _MAX_RETRIES,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise
             if response.status_code != 429:
                 response.raise_for_status()
                 return response

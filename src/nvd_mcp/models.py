@@ -31,7 +31,8 @@ class NvdCvssData(BaseModel):
     version: str
     vector_string: str = Field(alias="vectorString")
     base_score: float = Field(alias="baseScore")
-    base_severity: str = Field(alias="baseSeverity")
+    # CVSSv2 responses from NVD omit baseSeverity — derived from score instead
+    base_severity: str | None = Field(default=None, alias="baseSeverity")
 
 
 class NvdCvssMetric(BaseModel):
