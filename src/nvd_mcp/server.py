@@ -88,7 +88,7 @@ async def lookup_cve(cve_id: str) -> dict[str, Any]:
         cve = await client.fetch_cve(cve_id)
     if cve is None:
         return {"error": f"{cve_id.upper()} not found in NVD."}
-    return to_detail(cve).model_dump()
+    return to_detail(cve).model_dump(mode="json")
 
 
 @mcp.tool()
@@ -108,7 +108,7 @@ async def search_cves(keyword: str, max_results: int = 10) -> list[dict[str, Any
         cves = await client.search(keyword, max_results)
     summaries = [to_summary(cve) for cve in cves]
     summaries.sort(key=lambda s: s.cvss_score or 0.0, reverse=True)
-    return [s.model_dump() for s in summaries]
+    return [s.model_dump(mode="json") for s in summaries]
 
 
 @mcp.tool()
@@ -204,7 +204,7 @@ async def summarize_risk(cve_ids: list[str]) -> dict[str, Any]:
         top_critical=top_critical,
         recommended_action=_recommended_action(counts),
     )
-    return report.model_dump()
+    return report.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------

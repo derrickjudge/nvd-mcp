@@ -202,9 +202,9 @@ class NvdClient:
             Successful HTTP response.
 
         Raises:
-            httpx.HTTPStatusError: On non-429 HTTP error responses.
+            httpx.HTTPStatusError: On 4xx client errors (not retried).
             httpx.TimeoutException: If all retry attempts time out.
-            RuntimeError: If the rate limit persists after all retries.
+            RuntimeError: If 429 or 5xx persists after all retries.
         """
         for attempt in range(_MAX_RETRIES):
             try:
@@ -222,21 +222,34 @@ class NvdClient:
                     await asyncio.sleep(wait)
                     continue
                 raise
-            if response.status_code != 429:
-                response.raise_for_status()
+
+            # 200–399: success
+            if response.status_code < 400:
                 return response
+
+            # 4xx client errors (except 429) are permanent — do not retry
+            if 400 <= response.status_code < 429:
+                response.raise_for_status()
+
+            # 429 or 5xx: retry with backoff, or raise on final attempt
             if attempt < _MAX_RETRIES - 1:
                 wait = float(
                     response.headers.get("Retry-After", _RETRY_BACKOFF[attempt])
                 )
                 logger.warning(
-                    "NVD rate limit hit (attempt %d/%d) — retrying in %.1fs",
+                    "NVD returned %d (attempt %d/%d) — retrying in %.1fs",
+                    response.status_code,
                     attempt + 1,
                     _MAX_RETRIES,
                     wait,
                 )
                 await asyncio.sleep(wait)
-        raise RuntimeError(f"NVD API rate limit exceeded after {_MAX_RETRIES} attempts")
+            else:
+                response.raise_for_status()
+
+        raise RuntimeError(  # unreachable — loop always returns or raises
+            f"NVD API unavailable after {_MAX_RETRIES} attempts"
+        )
 
     async def fetch_cve(self, cve_id: str) -> NvdCve | None:
         """Fetch a single CVE by ID.

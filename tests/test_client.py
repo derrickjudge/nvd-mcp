@@ -195,6 +195,11 @@ class TestNvdClientFetchCve:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 429
         mock_response.headers = {"Retry-After": "0"}
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "429 Too Many Requests",
+            request=MagicMock(),
+            response=mock_response,
+        )
 
         with patch("nvd_mcp.client.httpx.AsyncClient") as mock_client_cls:
             mock_http = AsyncMock()
@@ -204,7 +209,7 @@ class TestNvdClientFetchCve:
 
             with patch("nvd_mcp.client.asyncio.sleep", new_callable=AsyncMock):
                 async with NvdClient() as client:
-                    with pytest.raises(RuntimeError, match="rate limit exceeded"):
+                    with pytest.raises(httpx.HTTPStatusError):
                         await client.fetch_cve("CVE-2021-44228")
 
 
