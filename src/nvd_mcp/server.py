@@ -85,8 +85,12 @@ async def lookup_cve(cve_id: str) -> dict[str, Any]:
         Returns an error dict if the CVE is not found in NVD.
     """
     logger.info("lookup_cve called: cve_id=%s", cve_id)
-    async with NvdClient() as client:
-        cve = await client.fetch_cve(cve_id)
+    try:
+        async with NvdClient() as client:
+            cve = await client.fetch_cve(cve_id)
+    except (httpx.HTTPError, RuntimeError) as exc:
+        logger.error("lookup_cve: NVD request failed for %s: %s", cve_id.upper(), exc)
+        return {"error": f"NVD API unavailable — {exc}"}
     if cve is None:
         logger.warning("lookup_cve: %s not found in NVD", cve_id.upper())
         return {"error": f"{cve_id.upper()} not found in NVD."}
@@ -114,8 +118,12 @@ async def search_cves(keyword: str, max_results: int = 10) -> list[dict[str, Any
     """
     max_results = max(1, min(max_results, 20))
     logger.info("search_cves called: keyword=%r max_results=%d", keyword, max_results)
-    async with NvdClient() as client:
-        cves = await client.search(keyword, max_results)
+    try:
+        async with NvdClient() as client:
+            cves = await client.search(keyword, max_results)
+    except (httpx.HTTPError, RuntimeError) as exc:
+        logger.error("search_cves: NVD request failed for %r: %s", keyword, exc)
+        return [{"error": f"NVD API unavailable — {exc}"}]
     summaries = [to_summary(cve) for cve in cves]
     summaries.sort(key=lambda s: s.cvss_score or 0.0, reverse=True)
     logger.info("search_cves: keyword=%r returned %d results", keyword, len(summaries))
