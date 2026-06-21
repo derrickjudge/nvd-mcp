@@ -51,3 +51,7 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: tests that make live HTTP calls to NVD (deselect with '-m not integration')",
+]
+addopts = ["-m", "not integration"]

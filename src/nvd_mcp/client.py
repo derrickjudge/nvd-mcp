@@ -207,6 +207,9 @@ class NvdClient:
             RuntimeError: If 429 or 5xx persists after all retries.
         """
         for attempt in range(_MAX_RETRIES):
+            logger.debug(
+                "NVD GET params=%s (attempt %d/%d)", params, attempt + 1, _MAX_RETRIES
+            )
             try:
                 response = await self._http.get(NVD_BASE_URL, params=params)
             except httpx.TimeoutException:
@@ -221,7 +224,12 @@ class NvdClient:
                     )
                     await asyncio.sleep(wait)
                     continue
+                logger.error(
+                    "NVD request timed out after %d attempts — giving up", _MAX_RETRIES
+                )
                 raise
+
+            logger.debug("NVD responded: HTTP %d", response.status_code)
 
             # 200–399: success
             if response.status_code < 400:
@@ -267,11 +275,17 @@ class NvdClient:
         """
         if not CVE_ID_PATTERN.match(cve_id):
             raise ValueError(f"Invalid CVE ID format: {cve_id!r}")
+        logger.info("fetch_cve: requesting %s", cve_id.upper())
         response = await self._get({"cveId": cve_id.upper()})
         parsed = NvdResponse.model_validate(orjson.loads(response.content))
         if not parsed.vulnerabilities:
+            logger.info("fetch_cve: %s not found in NVD", cve_id.upper())
             return None
-        return parsed.vulnerabilities[0].cve
+        cve = parsed.vulnerabilities[0].cve
+        logger.info(
+            "fetch_cve: %s parsed successfully (status=%s)", cve.id, cve.vuln_status
+        )
+        return cve
 
     async def search(self, keyword: str, max_results: int) -> list[NvdCve]:
         """Search CVEs by keyword.
@@ -287,8 +301,15 @@ class NvdClient:
             httpx.HTTPStatusError: On unexpected HTTP error responses.
             RuntimeError: If rate limiting persists after all retries.
         """
+        logger.info("search: keyword=%r max_results=%d", keyword, max_results)
         response = await self._get(
             {"keywordSearch": keyword, "resultsPerPage": max_results}
         )
         parsed = NvdResponse.model_validate(orjson.loads(response.content))
+        logger.info(
+            "search: keyword=%r — %d/%d results returned",
+            keyword,
+            len(parsed.vulnerabilities),
+            parsed.total_results,
+        )
         return [v.cve for v in parsed.vulnerabilities]

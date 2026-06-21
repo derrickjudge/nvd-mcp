@@ -84,11 +84,20 @@ async def lookup_cve(cve_id: str) -> dict[str, Any]:
         published/modified dates, vuln status, and up to 5 reference URLs.
         Returns an error dict if the CVE is not found in NVD.
     """
+    logger.info("lookup_cve called: cve_id=%s", cve_id)
     async with NvdClient() as client:
         cve = await client.fetch_cve(cve_id)
     if cve is None:
+        logger.warning("lookup_cve: %s not found in NVD", cve_id.upper())
         return {"error": f"{cve_id.upper()} not found in NVD."}
-    return to_detail(cve).model_dump(mode="json")
+    detail = to_detail(cve)
+    logger.info(
+        "lookup_cve: %s resolved — score=%.1f severity=%s",
+        cve_id.upper(),
+        detail.cvss_score or 0.0,
+        detail.cvss_severity.value,
+    )
+    return detail.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -104,10 +113,12 @@ async def search_cves(keyword: str, max_results: int = 10) -> list[dict[str, Any
         CVE ID, one-line description, CVSS score, severity, and publish date.
     """
     max_results = max(1, min(max_results, 20))
+    logger.info("search_cves called: keyword=%r max_results=%d", keyword, max_results)
     async with NvdClient() as client:
         cves = await client.search(keyword, max_results)
     summaries = [to_summary(cve) for cve in cves]
     summaries.sort(key=lambda s: s.cvss_score or 0.0, reverse=True)
+    logger.info("search_cves: keyword=%r returned %d results", keyword, len(summaries))
     return [s.model_dump(mode="json") for s in summaries]
 
 
@@ -132,6 +143,7 @@ async def summarize_risk(cve_ids: list[str]) -> dict[str, Any]:
         ValueError: If ``cve_ids`` is empty, exceeds 10 items, or contains
             malformed CVE IDs.
     """
+    logger.info("summarize_risk called: ids=%s", cve_ids)
     if not cve_ids:
         raise ValueError("Provide at least one CVE ID.")
     if len(cve_ids) > 10:
@@ -214,6 +226,13 @@ async def summarize_risk(cve_ids: list[str]) -> dict[str, Any]:
 
 def main() -> None:
     """Start the NVD MCP server using stdio transport."""
+    logging.basicConfig(
+        stream=__import__("sys").stderr,
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    logger.info("NVD MCP server starting")
     mcp.run()
 
 

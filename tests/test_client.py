@@ -212,6 +212,53 @@ class TestNvdClientFetchCve:
                     with pytest.raises(httpx.HTTPStatusError):
                         await client.fetch_cve("CVE-2021-44228")
 
+    async def test_raises_after_max_retries_on_503(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 503
+        mock_response.headers = {}
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "503 Service Unavailable",
+            request=MagicMock(),
+            response=mock_response,
+        )
+
+        with patch("nvd_mcp.client.httpx.AsyncClient") as mock_client_cls:
+            mock_http = AsyncMock()
+            mock_http.get = AsyncMock(return_value=mock_response)
+            mock_http.aclose = AsyncMock()
+            mock_client_cls.return_value = mock_http
+
+            with patch("nvd_mcp.client.asyncio.sleep", new_callable=AsyncMock):
+                async with NvdClient() as client:
+                    with pytest.raises(httpx.HTTPStatusError):
+                        await client.fetch_cve("CVE-2021-44228")
+
+    async def test_succeeds_after_transient_503(self, log4shell_cve: NvdCve) -> None:
+        """First attempt returns 503, second attempt succeeds."""
+        error_response = MagicMock(spec=httpx.Response)
+        error_response.status_code = 503
+        error_response.headers = {}
+        error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "503 Service Unavailable",
+            request=MagicMock(),
+            response=error_response,
+        )
+        ok_payload = make_nvd_response([log4shell_cve]).model_dump(by_alias=True)
+        ok_response = _make_http_response(ok_payload)
+
+        with patch("nvd_mcp.client.httpx.AsyncClient") as mock_client_cls:
+            mock_http = AsyncMock()
+            mock_http.get = AsyncMock(side_effect=[error_response, ok_response])
+            mock_http.aclose = AsyncMock()
+            mock_client_cls.return_value = mock_http
+
+            with patch("nvd_mcp.client.asyncio.sleep", new_callable=AsyncMock):
+                async with NvdClient() as client:
+                    cve = await client.fetch_cve("CVE-2021-44228")
+
+        assert cve is not None
+        assert cve.id == "CVE-2021-44228"
+
 
 class TestNvdClientSearch:
     async def test_returns_list_of_cves(self, log4shell_cve: NvdCve) -> None:
