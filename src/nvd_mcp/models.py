@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import re
 from enum import Enum
-from typing import Optional
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +8,8 @@ CVE_ID_PATTERN = re.compile(r"^CVE-\d{4}-\d+$", re.IGNORECASE)
 
 
 class Severity(str, Enum):
+    """CVSS severity label as defined by NVD."""
+
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
@@ -24,6 +24,8 @@ class Severity(str, Enum):
 
 
 class NvdCvssData(BaseModel):
+    """Raw CVSS scoring data from a single NVD metric entry."""
+
     model_config = {"populate_by_name": True}
 
     version: str
@@ -33,6 +35,8 @@ class NvdCvssData(BaseModel):
 
 
 class NvdCvssMetric(BaseModel):
+    """One CVSS metric record (source + score data) from the NVD response."""
+
     model_config = {"populate_by_name": True}
 
     source: str
@@ -41,52 +45,58 @@ class NvdCvssMetric(BaseModel):
 
 
 class NvdDescription(BaseModel):
+    """A localised CVE description string."""
+
     lang: str
     value: str
 
 
 class NvdReference(BaseModel):
+    """A single external reference URL attached to a CVE."""
+
     url: str
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class NvdMetrics(BaseModel):
+    """All CVSS metric sets for a CVE, grouped by CVSS version."""
+
     model_config = {"populate_by_name": True}
 
-    cvss_metric_v31: list[NvdCvssMetric] = Field(
-        default_factory=list, alias="cvssMetricV31"
-    )
-    cvss_metric_v30: list[NvdCvssMetric] = Field(
-        default_factory=list, alias="cvssMetricV30"
-    )
-    cvss_metric_v2: list[NvdCvssMetric] = Field(
-        default_factory=list, alias="cvssMetricV2"
-    )
+    cvss_metric_v31: Annotated[list[NvdCvssMetric], Field(alias="cvssMetricV31")] = []
+    cvss_metric_v30: Annotated[list[NvdCvssMetric], Field(alias="cvssMetricV30")] = []
+    cvss_metric_v2: Annotated[list[NvdCvssMetric], Field(alias="cvssMetricV2")] = []
 
 
 class NvdCve(BaseModel):
+    """Full CVE record as returned by the NVD REST API v2."""
+
     model_config = {"populate_by_name": True}
 
     id: str
     published: str
     last_modified: str = Field(alias="lastModified")
-    vuln_status: Optional[str] = Field(default=None, alias="vulnStatus")
-    descriptions: list[NvdDescription] = Field(default_factory=list)
+    vuln_status: str | None = Field(default=None, alias="vulnStatus")
+    descriptions: list[NvdDescription] = []
     metrics: NvdMetrics = Field(default_factory=NvdMetrics)
-    references: list[NvdReference] = Field(default_factory=list)
+    references: list[NvdReference] = []
 
 
 class NvdVulnerability(BaseModel):
+    """Wrapper object that NVD uses to nest a CVE record in the response list."""
+
     cve: NvdCve
 
 
 class NvdResponse(BaseModel):
+    """Top-level NVD API v2 response envelope."""
+
     model_config = {"populate_by_name": True}
 
     results_per_page: int = Field(alias="resultsPerPage")
     start_index: int = Field(alias="startIndex")
     total_results: int = Field(alias="totalResults")
-    vulnerabilities: list[NvdVulnerability] = Field(default_factory=list)
+    vulnerabilities: list[NvdVulnerability] = []
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +112,9 @@ class CveDetail(BaseModel):
     published: str
     last_modified: str
     vuln_status: str
-    cvss_score: Optional[float]
+    cvss_score: float | None
     cvss_severity: Severity
-    cvss_vector: Optional[str]
+    cvss_vector: str | None
     references: list[str]
 
 
@@ -113,12 +123,14 @@ class CveSummary(BaseModel):
 
     cve_id: str
     description: str
-    cvss_score: Optional[float]
+    cvss_score: float | None
     cvss_severity: Severity
     published: str
 
 
 class SeverityCounts(BaseModel):
+    """Count of CVEs at each CVSS severity level."""
+
     critical: int = 0
     high: int = 0
     medium: int = 0
@@ -127,12 +139,15 @@ class SeverityCounts(BaseModel):
 
     @property
     def total(self) -> int:
+        """Total number of CVEs across all severity levels."""
         return self.critical + self.high + self.medium + self.low + self.none
 
 
 class TopCve(BaseModel):
+    """Summary of a high-severity CVE for inclusion in a risk report."""
+
     cve_id: str
-    cvss_score: Optional[float]
+    cvss_score: float | None
     cvss_severity: Severity
     description: str
 
